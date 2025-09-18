@@ -13,6 +13,9 @@ rust-version.workspace = true
 
 [dependencies]
 revm = "29.0.0"
+crossbeam-channel = "0.5"
+core_affinity = "0.8"
+crossbeam = "0.8"
 
 [lints]
 workspace = true

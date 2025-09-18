@@ -48,7 +48,7 @@ impl Database for CrystalityDB{
     type Error = CrystalityDBError;
 
     fn basic(&mut self,address:Address) -> Result<Option<AccountInfo> ,Self::Error>  {
-        println!("basic => address:{:?}",address);
+        // println!("basic => address:{:?}",address);
         Ok(self.accounts.get(&address).map(|acc| {
             let code_hash = if acc.code.is_empty() {
                 KECCAK256_EMPTY
@@ -87,7 +87,7 @@ impl DatabaseCommit for CrystalityDB {
         for (addr, account) in changes {
             for (slot, value) in account.storage {
                 if value.is_changed(){
-                    println!("set storage => address:{:?}, StorageKey:{},Value:{}",addr,slot,value.present_value());
+                    // println!("set storage => address:{:?}, StorageKey:{},Value:{}",addr,slot,value.present_value());
                     self.accounts
                         .entry(addr)
                         .or_default()
