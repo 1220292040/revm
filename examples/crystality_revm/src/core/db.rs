@@ -120,7 +120,7 @@ impl DatabaseCommit for CrystalityDB {
         for (addr, account) in changes {
             for (slot, value) in account.storage {
                 if value.is_changed(){
-                    // println!("set storage => address:{:?}, StorageKey:{},Value:{}",addr,slot,value.present_value());
+                    println!("shard#{} set storage => address:{:?}, StorageKey:{},Value:{}",self.id,addr,slot,value.present_value());
                     self.accounts
                         .entry(addr)
                         .or_default()

@@ -40,7 +40,7 @@ fn main() {
         .unwrap();
 
     for shard in &sim.shards{
-        for i in 0..100 {
+        for i in 0..10 {
             shard.send(ShardMsg::PushTxn(tx_mint.clone())).unwrap();
         }
     }

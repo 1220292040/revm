@@ -58,13 +58,37 @@ impl ShardRouter {
         let _ = self.globalshard.send(ShardMsg::PushTxn(txn));
     }
     pub fn relay_to_shard(&self, txn:TxEnv){
-        // let _ = self.shards[shard_id as usize].send(ShardMsg::Relay(txn));
+        let input = txn.input().as_ref();
+        const SELECTOR_LEN: usize = 4;
+        const OFFSET: usize = SELECTOR_LEN + 28;
+        if self.shards.is_empty() {
+            let _ = self.globalshard.send(ShardMsg::PushTxn(txn));
+            return;
+        }
+        if input.len() > OFFSET + 4{
+            let idx_be = u32::from_be_bytes([
+                input[OFFSET],
+                input[OFFSET + 1],
+                input[OFFSET + 2],
+                input[OFFSET + 3],
+            ]) as usize;
+
+            let sid = idx_be % self.shards.len();
+            let _ = self.shards[sid].send(ShardMsg::PushTxn(txn));
+        } else {
+            let _ = self.globalshard.send(ShardMsg::PushTxn(txn));
+        }
     }
     pub fn relay_to_all_shards(&self, txn:TxEnv){
         for shard in self.shards.iter(){
             let _ = shard.send(ShardMsg::PushTxn(txn.clone()));
         }
     }
+}
+
+pub struct RelayEmission{
+    pub txn: TxEnv,
+    pub origin: Address,
 }
 
 pub struct Shard{
@@ -74,7 +98,7 @@ pub struct Shard{
     pub block:BlockEnv,
     pub engine:EvmExecuteEngine,
     pub pending_txns: Mutex<VecDeque<TxEnv>>,
-    pub relay_txns:Receiver<TxEnv>,
+    pub relay_txns:Receiver<RelayEmission>,
     pub router: Arc<ShardRouter>,
     block_height:u64,
     executed_txns:u64,
@@ -83,7 +107,7 @@ pub struct Shard{
 impl Shard {
     pub fn new(id:ShardId, cfg:CfgEnv, block:BlockEnv, router: Arc<ShardRouter>)->Self{
         let db = CrystalityDB::new(id, router.global());
-        let (relay_emits,relay_txns) = unbounded::<TxEnv>();
+        let (relay_emits,relay_txns) = unbounded::<RelayEmission>();
         let engine = EvmExecuteEngine::new(relay_emits);
         Self{
             id,
@@ -129,18 +153,23 @@ impl Shard {
 
     pub fn dispatch(&mut self){
         for relay in self.relay_txns.try_iter(){
-            let target = match &relay.kind { TxKind::Call(to) => *to, _ => panic!() };
+            let txn = relay.txn;
+            let origin = relay.origin;
+            let target = match &txn.kind { TxKind::Call(to) => *to, _ => panic!() };
             if target == addr_from_u64(RELAY_TO_GLOBAL) {
-                let mut tx = relay.clone();
+                let mut tx = txn.clone();
                 tx.kind = TxKind::Call(tx.caller);
+                tx.caller = origin;
                 self.router.relay_to_global(tx);  
             } else if target == addr_from_u64(RELAY_TO_ADDRESS) {
-               let mut tx = relay.clone();
+               let mut tx = txn.clone();
                 tx.kind = TxKind::Call(tx.caller);
+                tx.caller = origin;
                 self.router.relay_to_shard(tx);
             } else if target == addr_from_u64(RELAY_TO_SHARDS) {
-                let mut tx = relay.clone();
+                let mut tx = txn.clone();
                 tx.kind = TxKind::Call(tx.caller);
+                tx.caller = origin;
                 self.router.relay_to_all_shards(tx);
             } else {
                 panic!()
@@ -167,6 +196,7 @@ impl Shard {
         for msg in receiver{
             match msg {
                 ShardMsg::PushTxn(txn)=>{
+                    // println!("Shard#{} push txn ", self.id);
                     self.push_txn(txn);
                 }
                 ShardMsg::Deploy { code, address_index, input_data,reply} => {
@@ -184,6 +214,7 @@ impl Shard {
                     let mut executed = 0;
                     while let Some(txn) = self.pop_txn() {
                         let res = self.execute(txn);
+                        // println!("Shard#{} execute txn {:?}", self.id, res);
                         executed += 1;
                         self.executed_txns += 1;
                         if executed == MAX_TXN_PER_BLOCK{

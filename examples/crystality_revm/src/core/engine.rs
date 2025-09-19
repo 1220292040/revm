@@ -12,22 +12,24 @@ use revm::{
 use crate::{
     codec::encoder::addr_from_u64,
     core::{
-        db::{CrystalityAccount, CrystalityDB}, shard::{ShardRouter}, RELAY_TO_ADDRESS, RELAY_TO_GLOBAL, RELAY_TO_SHARDS
+        db::{CrystalityAccount, CrystalityDB}, shard::{RelayEmission, ShardRouter}, RELAY_TO_ADDRESS, RELAY_TO_GLOBAL, RELAY_TO_SHARDS
     }
 };
 
 #[derive(Clone)]
 pub struct CrystalityInspector{
-    pub relay_emits: Sender<TxEnv>,
+    pub relay_emits: Sender<RelayEmission>,
+    pub origin: Address,
 }
 
 /** 
  * CrystalityInspector
 */
 impl CrystalityInspector {
-    pub fn new(relay_emits:  Sender<TxEnv>)->Self{
+    pub fn new(relay_emits:  Sender<RelayEmission>, origin:Address)->Self{
         Self{
-            relay_emits
+            relay_emits,
+            origin,
         }
     }
 }
@@ -61,7 +63,7 @@ where CTX:ContextTr
             || inputs.bytecode_address == addr_from_u64(RELAY_TO_SHARDS)
         {
             let data = calldata_as_bytes(ctx, &inputs.input);
-
+            
             let relay_tx = TxEnv::builder()
                 .caller(inputs.caller)
                 .kind(TxKind::Call(inputs.bytecode_address))
@@ -69,7 +71,7 @@ where CTX:ContextTr
                 .build()
                 .unwrap();
 
-            let _ = self.relay_emits.send(relay_tx);
+            let _ = self.relay_emits.send(RelayEmission{txn:relay_tx, origin:self.origin});
 
             let result = InterpreterResult::new(InstructionResult::Return, Bytes::new(), Gas::new(0));
             return Some(CallOutcome { result, memory_offset: 0..0 });
@@ -79,16 +81,24 @@ where CTX:ContextTr
 }
 
 pub struct EvmExecuteEngine{
-    pub relay_emits: Sender<TxEnv>,
+    pub relay_emits: Sender<RelayEmission>,
 }
 /**
  * EvmExecuteEngine
  */
 impl EvmExecuteEngine {
-    pub fn new(relay_emits: Sender<TxEnv>)->Self{
+    pub fn new(relay_emits: Sender<RelayEmission>)->Self{
         Self{
             relay_emits
         }
+    }
+
+    #[inline]
+    fn is_eoa(db: &CrystalityDB, addr: Address) -> bool {
+        db.accounts
+            .get(&addr)
+            .map(|acc| acc.code.is_empty())
+            .unwrap_or(true)
     }
 
     pub fn execute(
@@ -98,12 +108,18 @@ impl EvmExecuteEngine {
         block: &BlockEnv, 
         tx: TxEnv
     )->Result<ExecutionResult, EVMError<<CrystalityDB as Database>::Error>>{
+        let origin = if Self::is_eoa(db, tx.caller) {
+            tx.caller
+        } else {
+            Address::ZERO
+        };
+
         let ctx = Context::mainnet()
             .with_cfg(cfg.clone())
             .with_block(block.clone())
             .with_db(db);
-        
-        let insp = CrystalityInspector::new(self.relay_emits.clone());
+
+        let insp = CrystalityInspector::new(self.relay_emits.clone(), origin);
         let mut evm = ctx.build_mainnet_with_inspector(insp);
         
         evm.inspect_tx_commit(tx)
