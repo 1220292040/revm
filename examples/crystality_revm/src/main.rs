@@ -2,6 +2,7 @@
 
 use std::{fs, sync::Arc};
 
+use crossbeam_channel::unbounded;
 use revm::{context::{BlockEnv, CfgEnv, TxEnv}, primitives::{hex, Bytes, TxKind, U256}};
 
 use crate::{codec::encoder::addr_from_u64, core::{schedule::Simulator, shard::{Shard, ShardMsg, ShardRouter}}};
@@ -38,15 +39,21 @@ fn main() {
         .build()
         .unwrap();
 
-    for i in 0..100000{
-        sim.globalshard.send(ShardMsg::PushTxn(tx_mint.clone())).unwrap();
-    }
     for shard in &sim.shards{
-        for i in 0..100000 {
+        for i in 0..100 {
             shard.send(ShardMsg::PushTxn(tx_mint.clone())).unwrap();
         }
     }
 
     sim.run();
 
+    let (tx, rx) = unbounded::<u64>();
+    sim.globalshard.send(ShardMsg::GetBlockHeight{reply:tx}).unwrap();
+    let height = rx.recv().unwrap();
+    println!("block height: {:?}", height);
+    
+    let (tx, rx) = unbounded::<u64>();
+    sim.globalshard.send(ShardMsg::GetExecutedTxns{reply:tx}).unwrap();
+    let txns = rx.recv().unwrap();
+    println!("executed txns: {:?}", txns);
 }

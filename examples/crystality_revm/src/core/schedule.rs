@@ -3,7 +3,7 @@
 use std::{collections::VecDeque, sync::{Arc, Mutex}};
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use revm::context::{BlockEnv, CfgEnv, TxEnv};
+use revm::context::{BlockEnv, CfgEnv};
 
 use crate::core::{shard::{Shard, ShardMsg, ShardRouter}, ShardId, GLOBAL_SHARD_ID, PHYSICAL_CORES};
 
@@ -18,19 +18,28 @@ impl Simulator {
     pub fn new(order:u32) -> Self {
         let shard_count = 1<<order;
         assert!( shard_count as usize <= PHYSICAL_CORES.len() );
-        let router = Arc::new(ShardRouter::default());
 
-        let mut shards = Vec::new();
-        for i in 0..shard_count {
-            let s = Shard::new(i ,CfgEnv::default(), BlockEnv::default(), router.clone());
-            let handler = s.init();
-            shards.push(handler);
+        let mut channels :Vec<(Sender<ShardMsg>,Receiver<ShardMsg>)>  = Vec::with_capacity(shard_count as usize);
+        for _ in 0..shard_count{
+            channels.push(unbounded());
         }
-        let g =Shard::new(GLOBAL_SHARD_ID, CfgEnv::default(), BlockEnv::default(), router);
-        let globalshard = g.init();
+        let (global_sender,global_receiver) = unbounded::<ShardMsg>();
+        
+        let mut shards: Vec<Sender<ShardMsg>> = channels.iter().map(|(tx, _)| tx.clone()).collect();
+        
+        let router = Arc::new(ShardRouter::new(global_sender.clone(),shards.clone()));
+
+
+        for (i, (_, rx)) in channels.into_iter().enumerate() {
+            let shard = Shard::new(i as ShardId, CfgEnv::default(), BlockEnv::default(), router.clone());
+            shard.start(rx); 
+        }
+
+        let global =Shard::new(GLOBAL_SHARD_ID, CfgEnv::default(), BlockEnv::default(), router.clone());
+        global.start(global_receiver);
         
         Self {
-            globalshard,
+            globalshard:global_sender,
             shards,
             shard_count
         }
@@ -99,21 +108,21 @@ impl Simulator {
             let _ = self.globalshard.send(ShardMsg::Step { reply: tx });
             let id = rx.recv().unwrap();
             println!("global Shard#{} finished step", id);
-            //bottleneck???
-            crossbeam::scope(|s| {
-                for shard in &self.shards {
-                    let (tx, rx) = unbounded::<ShardId>();
-                    receivers.push(rx);
-                    s.spawn(move |_| {
-                        let _ = shard.send(ShardMsg::Step { reply: tx });
-                    });
-                }
-            }).unwrap();
-            // for shard in &self.shards {
-            //     let (tx, rx) = unbounded::<ShardId>();
-            //     let _ = shard.send(ShardMsg::Step { reply: tx});
-            //     receivers.push(rx);
-            // }
+            //bottleneck??? 
+            for shard in &self.shards {
+                let (tx, rx) = unbounded::<ShardId>();
+                let _ = shard.send(ShardMsg::Step { reply: tx});
+                receivers.push(rx);
+            }
+            // crossbeam::scope(|s| {
+            //     for shard in &self.shards {
+            //         let (tx, rx) = unbounded::<ShardId>();
+            //         receivers.push(rx);
+            //         s.spawn(move |_| {
+            //             let _ = shard.send(ShardMsg::Step { reply: tx });
+            //         });
+            //     }
+            // }).unwrap();
             for receiver in receivers{
                 let id = receiver.recv().unwrap();
                 println!("Normal Shard#{} finished step", id);

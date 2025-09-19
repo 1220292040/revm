@@ -3,7 +3,10 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::error::Error;
+use crossbeam_channel::{bounded, Sender};
 use revm::{context::DBErrorMarker, primitives::{alloy_primitives::KECCAK256_EMPTY, hex, keccak256, Address, Bytes, StorageKey, StorageValue, B256, U256}, state::{Account, AccountInfo, Bytecode}, Database, DatabaseCommit};
+
+use crate::core::{shard::ShardMsg, ShardId, GLOBAL_SHARD_ID};
 
 
 #[derive(Debug)]
@@ -38,9 +41,37 @@ pub struct CrystalityAccount{
     pub storage:HashMap<StorageKey,StorageValue>,
 }
 
-#[derive(Debug,Default)]
 pub struct CrystalityDB{
     pub accounts:HashMap<Address,CrystalityAccount>,
+    pub id: ShardId,
+    pub global: Sender<ShardMsg>,
+}
+
+impl CrystalityDB {
+    pub fn new(id: ShardId, global: Sender<ShardMsg>) -> Self {
+        Self {
+            accounts: HashMap::new(),
+            id,
+            global,
+        }
+    }
+
+    #[inline]
+    pub fn local_get_storage(&self, addr: Address, slot: StorageKey) -> Option<U256> {
+        self.accounts
+            .get(&addr)
+            .and_then(|acc| acc.storage.get(&slot).copied())
+    }
+
+    #[inline]
+    pub fn fetch_from_global(&self, addr: Address, slot: StorageKey) -> Option<U256> {
+        if self.id == GLOBAL_SHARD_ID {
+            return self.local_get_storage(addr, slot);
+        }
+        let (tx, rx) = bounded::<Option<U256>>(1);
+        let _ = self.global.send(ShardMsg::GetGlobalStorage { address: addr, slot, reply: tx });
+        rx.recv().ok().flatten()
+    }
 }
 
 impl Database for CrystalityDB{
@@ -70,11 +101,13 @@ impl Database for CrystalityDB{
     }
 
     fn storage(&mut self,address:Address,index:StorageKey) -> Result<StorageValue,Self::Error>  {
-        Ok(self
-            .accounts
-            .get(&address)
-            .and_then(|acc| acc.storage.get(&index).copied())
-            .unwrap_or(StorageValue::ZERO))        
+        if let Some(v) = self.local_get_storage(address, index) {
+            Ok(v)
+        } else if let Some(v) = self.fetch_from_global(address, index) {
+            Ok(v)
+        } else {
+            Ok(U256::ZERO) 
+        }     
     }
 
     fn block_hash(&mut self,number:u64) -> Result<B256,Self::Error>  {

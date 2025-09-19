@@ -2,57 +2,92 @@
 
 use std::{io::Read, sync::Arc};
 
+use crossbeam_channel::Sender;
 use revm::{
     context::{
-        result::{EVMError, ExecutionResult, Output}, BlockEnv, CfgEnv, Context, ContextTr, Database, TxEnv
-    }, interpreter::{CallInputs, CallOutcome, Interpreter}, primitives::{keccak256, Address, Bytes, TxKind, U256}, state::{AccountInfo, Bytecode}, InspectCommitEvm, Inspector, MainBuilder, MainContext
+        result::{EVMError, ExecutionResult, Output}, BlockEnv, CfgEnv, Context, ContextTr, Database, LocalContextTr, TxEnv
+    }, interpreter::{CallInput, CallInputs, CallOutcome, Gas, InstructionResult, Interpreter, InterpreterResult}, primitives::{keccak256, Address, Bytes, TxKind, U256}, state::{AccountInfo, Bytecode}, InspectCommitEvm, Inspector, MainBuilder, MainContext
 };
 
 use crate::{
     codec::encoder::addr_from_u64,
     core::{
-        db::{CrystalityAccount, CrystalityDB}, 
-        shard::ShardRouter
+        db::{CrystalityAccount, CrystalityDB}, shard::{ShardRouter}, RELAY_TO_ADDRESS, RELAY_TO_GLOBAL, RELAY_TO_SHARDS
     }
 };
 
 #[derive(Clone)]
 pub struct CrystalityInspector{
-    router: Arc<ShardRouter>,
-}
-
-pub struct EvmExecuteEngine{
-    router: Arc<ShardRouter>,
+    pub relay_emits: Sender<TxEnv>,
 }
 
 /** 
  * CrystalityInspector
 */
 impl CrystalityInspector {
-    pub fn new(router: Arc<ShardRouter>)->Self{
+    pub fn new(relay_emits:  Sender<TxEnv>)->Self{
         Self{
-            router
+            relay_emits
         }
     }
 }
 
+#[inline]
+fn calldata_as_bytes<CTX: ContextTr>(ctx: &mut CTX, input: &CallInput) -> Bytes {
+    match input {
+        CallInput::Bytes(b) => b.clone(),
+        CallInput::SharedBuffer(r) => {
+            if r.is_empty() {
+                return Bytes::new();
+            }
+            match ctx.local().shared_memory_buffer_slice(r.clone()) {
+                Some(buf_ref) => {
+                    Bytes::copy_from_slice(&*buf_ref)
+                }
+                None => {
+                    Bytes::new()
+                }
+            }
+        }
+    }
+}
 impl<CTX> Inspector<CTX> for CrystalityInspector
 where CTX:ContextTr
 {
-    #[inline]
-    fn call(&mut self,context: &mut CTX,inputs: &mut CallInputs) -> Option<CallOutcome>{
-        // println!("call");
+     #[inline]
+    fn call(&mut self, ctx: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
+        if inputs.bytecode_address == addr_from_u64(RELAY_TO_GLOBAL)
+            || inputs.bytecode_address == addr_from_u64(RELAY_TO_ADDRESS)
+            || inputs.bytecode_address == addr_from_u64(RELAY_TO_SHARDS)
+        {
+            let data = calldata_as_bytes(ctx, &inputs.input);
+
+            let relay_tx = TxEnv::builder()
+                .caller(inputs.caller)
+                .kind(TxKind::Call(inputs.bytecode_address))
+                .data(data)
+                .build()
+                .unwrap();
+
+            let _ = self.relay_emits.send(relay_tx);
+
+            let result = InterpreterResult::new(InstructionResult::Return, Bytes::new(), Gas::new(0));
+            return Some(CallOutcome { result, memory_offset: 0..0 });
+        }
         None
     }
 }
 
+pub struct EvmExecuteEngine{
+    pub relay_emits: Sender<TxEnv>,
+}
 /**
  * EvmExecuteEngine
  */
 impl EvmExecuteEngine {
-    pub fn new(router: Arc<ShardRouter>)->Self{
+    pub fn new(relay_emits: Sender<TxEnv>)->Self{
         Self{
-            router
+            relay_emits
         }
     }
 
@@ -68,7 +103,7 @@ impl EvmExecuteEngine {
             .with_block(block.clone())
             .with_db(db);
         
-        let insp = CrystalityInspector::new(self.router.clone());
+        let insp = CrystalityInspector::new(self.relay_emits.clone());
         let mut evm = ctx.build_mainnet_with_inspector(insp);
         
         evm.inspect_tx_commit(tx)
