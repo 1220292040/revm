@@ -1,11 +1,11 @@
 //! Example: crystality_revm
 
-use std::{fs, sync::Arc};
+use std::fs;
 
 use crossbeam_channel::unbounded;
-use revm::{context::{BlockEnv, CfgEnv, TxEnv}, primitives::{hex, Bytes, TxKind, U256}};
+use revm::{context::TxEnv, primitives::{hex,Bytes, TxKind, U256}};
 
-use crate::{codec::encoder::addr_from_u64, core::{schedule::Simulator, shard::{Shard, ShardMsg, ShardRouter}}};
+use crate::{codec::encoder::addr_from_u64, core::{schedule::Simulator, shard::ShardMsg}};
 
 mod core;
 mod codec;

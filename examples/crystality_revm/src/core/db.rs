@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::error::Error;
 use crossbeam_channel::{bounded, Sender};
-use revm::{context::DBErrorMarker, primitives::{alloy_primitives::KECCAK256_EMPTY, hex, keccak256, Address, Bytes, StorageKey, StorageValue, B256, U256}, state::{Account, AccountInfo, Bytecode}, Database, DatabaseCommit};
+use revm::{context::DBErrorMarker, primitives::{alloy_primitives::KECCAK256_EMPTY,keccak256, Address, Bytes, StorageKey, StorageValue, B256, U256}, state::{Account, AccountInfo, Bytecode}, Database, DatabaseCommit};
 
 use crate::core::{shard::ShardMsg, ShardId, GLOBAL_SHARD_ID};
 
@@ -96,7 +96,7 @@ impl Database for CrystalityDB{
         }))
     }
 
-    fn code_by_hash(&mut self,code_hash:B256) -> Result<Bytecode,Self::Error>  {
+    fn code_by_hash(&mut self,_code_hash:B256) -> Result<Bytecode,Self::Error>  {
         Ok(Bytecode::new_raw(Bytes::new()))
     }
 
@@ -110,7 +110,7 @@ impl Database for CrystalityDB{
         }     
     }
 
-    fn block_hash(&mut self,number:u64) -> Result<B256,Self::Error>  {
+    fn block_hash(&mut self,_number:u64) -> Result<B256,Self::Error>  {
         Ok(B256::default())
     }
 }

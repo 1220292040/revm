@@ -1,9 +1,9 @@
 //! Schedule(Simulator) for the crystal revm
 
-use std::{collections::VecDeque, sync::{Arc, Mutex}};
+use std::sync::Arc;
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use revm::context::{BlockEnv, CfgEnv};
+use revm::{bytecode::bitvec::view::BitViewSized, context::{BlockEnv, CfgEnv, Transaction, TxEnv}};
 
 use crate::core::{shard::{Shard, ShardMsg, ShardRouter}, ShardId, GLOBAL_SHARD_ID, PHYSICAL_CORES};
 
@@ -43,6 +43,20 @@ impl Simulator {
             shards,
             shard_count
         }
+    }
+
+    pub fn add_global_task(&self, txn:TxEnv){
+        let _ = self.globalshard.send(ShardMsg::PushTxn(txn));
+    }
+
+    pub fn add_task(&self, txn:TxEnv){
+        let sender_index = txn.caller().as_raw_slice()[16..20].try_into().expect("invalid address");
+        let sid = (u32::from_be_bytes(sender_index) % self.shard_count) as usize;
+        let _ = self.shards[sid].send(ShardMsg::PushTxn(txn));
+    }
+
+    pub fn get_shard_count(&self) -> u32{
+        self.shard_count
     }
 
     pub fn deploy(&self, code: &[u8], address_index: u64, input_data: &[u8]) {
@@ -131,8 +145,15 @@ impl Simulator {
                 break;
             }
         }
-        
     }
+
+    pub fn stop(&self){
+        let _ = self.globalshard.send(ShardMsg::Stop);
+        for shard in &self.shards{
+            let _ = shard.send(ShardMsg::Stop);
+        }
+    }
+        
 
 }
     

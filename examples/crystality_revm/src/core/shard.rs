@@ -1,12 +1,12 @@
 //! shard
 
-use std::{cell::RefCell, collections::VecDeque, rc::Rc, sync::{Arc, Mutex}, thread};
+use std::{collections::VecDeque, sync::{Arc, Mutex}, thread};
 use core_affinity::{set_for_current, CoreId};
 use crossbeam_channel::{Sender,Receiver,unbounded};
 
 use revm::{context::{result::{EVMError, ExecutionResult}, BlockEnv, CfgEnv, Transaction, TxEnv}, primitives::{Address, StorageKey, TxKind, U256}, Database};
 
-use crate::core::{db::{CrystalityDB, CrystalityDBError}, engine::{self, EvmExecuteEngine}, ShardId, GLOBAL_SHARD_ID, MAX_TXN_PER_BLOCK, PHYSICAL_CORES, RELAY_TO_ADDRESS, RELAY_TO_GLOBAL, RELAY_TO_SHARDS};
+use crate::core::{db::CrystalityDB, engine::EvmExecuteEngine, ShardId, GLOBAL_SHARD_ID, MAX_TXN_PER_BLOCK, PHYSICAL_CORES, RELAY_TO_ADDRESS, RELAY_TO_GLOBAL, RELAY_TO_SHARDS};
 use crate::codec::encoder::addr_from_u64;
 
 #[derive(Debug)]

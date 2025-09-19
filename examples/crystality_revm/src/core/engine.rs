@@ -1,18 +1,15 @@
 //! Crystality execution engine
-
-use std::{io::Read, sync::Arc};
-
 use crossbeam_channel::Sender;
 use revm::{
     context::{
-        result::{EVMError, ExecutionResult, Output}, BlockEnv, CfgEnv, Context, ContextTr, Database, LocalContextTr, TxEnv
-    }, interpreter::{CallInput, CallInputs, CallOutcome, Gas, InstructionResult, Interpreter, InterpreterResult}, primitives::{keccak256, Address, Bytes, TxKind, U256}, state::{AccountInfo, Bytecode}, InspectCommitEvm, Inspector, MainBuilder, MainContext
+        result::{EVMError, ExecutionResult}, BlockEnv, CfgEnv, Context, ContextTr, Database, LocalContextTr, TxEnv
+    }, interpreter::{CallInput, CallInputs, CallOutcome, Gas, InstructionResult, InterpreterResult}, primitives::{Address, Bytes, TxKind}, InspectCommitEvm, Inspector, MainBuilder, MainContext
 };
 
 use crate::{
     codec::encoder::addr_from_u64,
     core::{
-        db::{CrystalityAccount, CrystalityDB}, shard::{RelayEmission, ShardRouter}, RELAY_TO_ADDRESS, RELAY_TO_GLOBAL, RELAY_TO_SHARDS
+        db::{CrystalityAccount, CrystalityDB}, shard::RelayEmission, RELAY_TO_ADDRESS, RELAY_TO_GLOBAL, RELAY_TO_SHARDS
     }
 };
 
@@ -153,8 +150,6 @@ impl EvmExecuteEngine {
 
         if let Ok(success) = &res {
             if let  Some(code_bytes) = success.output() {
-
-                let code_hash = keccak256(code_bytes);
                 let code = code_bytes.clone();
                 db.accounts.insert(
                     contract_address,
