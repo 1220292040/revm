@@ -154,11 +154,7 @@ impl Shard {
         receiver: Receiver<ShardMsg>,
     ) {
         thread::spawn(move||{
-            if self.id == GLOBAL_SHARD_ID {
-                let core = CoreId{id: 0 as usize};
-                set_for_current(core);
-                println!("Shard#{} bound to core {}", self.id, core.id);
-            }else{
+            if self.id != GLOBAL_SHARD_ID {
                 let core = CoreId{id: PHYSICAL_CORES[self.id as usize % PHYSICAL_CORES.len()] as usize};
                 set_for_current(core);
                 println!("Shard#{} bound to core {}", self.id, core.id);
